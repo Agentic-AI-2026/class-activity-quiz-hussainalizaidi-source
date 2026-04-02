@@ -60,3 +60,34 @@ Notes
 You may use any LLM (local or API)
 Focus on correctness and flow rather than optimization
 Keep your implementation clean and readable
+
+---
+
+## Solution Explanation
+
+This repository contains the successfully converted Planner–Executor agent using **LangGraph**. 
+
+### Architecture & Implementation Details
+
+1. **State Definition (`AgentState`)**:
+   - Defined in `graph.py` using `TypedDict` and `Annotated`. 
+   - Contains the `goal` (string), `plan` (list of dictionaries representing steps), `current_step` (integer step index), and `results` (list of step outcomes with `operator.add` as the reducer).
+
+2. **Planner Node (`planner_node`)**:
+   - Receives the initial `goal` and leverages a carefully designed zero-shot prompt with `gemini-2.5-flash` via the `ChatGoogleGenerativeAI` client.
+   - Generates a structured JSON array for the `plan`, predicting the MCP tools necessary and omitting them (using `null`) when synthesis is needed.
+
+3. **Executor Node (`executor_node`)**:
+   - Manages execution one step at a time based on `current_step`.
+   - Dynamically interfaces with Local MCP clients (`MultiServerMCPClient`) connecting via `stdio`. 
+   - If a `tool` is identified, the executor maps the arguments safely and calls the tool asynchronously.
+   - If the task dictates synthesis or string formatting, it provides the LLM with the context gathered from the `results` history list to generate a final response.
+
+4. **Graph Routing Flow**:
+   - Built using `StateGraph(AgentState)`.
+   - Setup: `START` $\rightarrow$ `planner_node` $\rightarrow$ `executor_node`.
+   - A conditional route mechanism checks `state["current_step"] >= len(state["plan"])`. If true, the graph transitions to `END`; otherwise, it recursively calls `executor_node`.
+
+5. **Stability Improvements**:
+   - **Environment Event Loops**: Isolated Python 3.14 task conflicts spanning unhandled task groups and `sniffio` exceptions by forcefully binding `sniffio.current_async_library_cvar.set("asyncio")` inside the agent nodes. 
+   - **MCP Hardening**: Removed global outer-loop variables affecting `await` syntax from legacy code, and updated MCP servers (`weather`, `search`) to use deterministic standard I/O communication logic preventing orphan uvicorn workers.
